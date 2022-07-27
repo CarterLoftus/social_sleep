@@ -1,0 +1,16 @@
+#!/bin/bash -l
+
+#SBATCH -J thermal_acc_animation          # job name
+#SBATCH -o ./job.out.%j    # standard out file
+#SBATCH -e ./job.err.%j    # standard err file
+#SBATCH -D ./              # work directory
+#SBATCH --nodes=1         # launch job on a single core
+#SBATCH --tasks-per-node=1         # no mpi or hyperprocessing
+#SBATCH --cpus-per-task=72  #   on a shared node
+#SBATCH --mem=2048000       # request a special node with 2 TB of RAM # delete this line if you have decreased the number of videos and individuals to process below the point of needing more RAM
+#SBATCH --time=24:00:00     # run time, up to 24h
+
+##### here you can list the modules that you need to load in order for the job to run e.g. (but see “getting R to work on cluster”´
+conda activate thermal_acc_gps_virtualenv_37
+srun python3 ./acc_gps_thermal_for_ID_python_3_7_for_HPC_parallel_a.py
+
