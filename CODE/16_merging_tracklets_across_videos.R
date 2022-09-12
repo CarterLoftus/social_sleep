@@ -449,3 +449,199 @@ tracklets[ which( as.numeric( str_split( tracklets, "_", simplify = T )[ , vid_n
 
 
 
+
+
+
+#### Manual merging of tracks across videos. Note that manual merge is only relevant for corrected tracks, and this code will run on tracks in the finalized_tracks folder, regardless of the 'input_data' that is input above ####
+
+
+input_data <- 'corrected'
+
+dir.create( paste0( getwd(), "/DATA/thermal_tracks/manual_stitch_across_vids/" ) )
+dir.create( paste0( getwd(), "/DATA/thermal_tracks/manual_stitch_across_vids/", input_data ) )
+
+
+
+if( str_split( getwd( ), "/", simplify = T )[ 1, 3 ] == 'jcl273' ){
+  
+  nights <- str_split_fixed( list.files( "DATA/vid_to_vid_id_matching/", pattern = '.csv' ), '.csv', 2 )[ , 1 ]
+  
+}else{
+  
+  nights <- str_split_fixed( list.files("Z:\\baboon\\working\\video\\thermal\\thermal_baboon\\DATA\\vid_to_vid_id_matching\\",  pattern = '.csv'  ), '.csv', 2 )[ , 1 ]
+  
+}
+
+
+if( str_split( getwd( ), "/", simplify = T )[ 1, 3 ] == 'jcl273' ){
+  
+  registerDoParallel( length( nights ) )
+  
+}else{
+  
+  registerDoParallel( 4 )
+  
+}
+
+
+thermal_tracks <- foreach( ni =  1:length( nights ), .packages = .packages() ) %dopar% {
+  
+  #for( ni in 1:length( nights ) ) {
+  
+  night <- nights[ ni ]
+  
+  
+  # read in manual matching data
+  if( str_split( getwd( ), "/", simplify = T )[ 1, 3 ] == 'jcl273' ){
+    
+    matching_dat <- read.csv( paste0( "DATA/vid_to_vid_id_matching/", night, ".csv" ) )
+    
+  }else{
+    
+    matching_dat <- read.csv( paste0( "Z:\\baboon\\working\\video\\thermal\\thermal_baboon\\DATA\\vid_to_vid_id_matching\\", night, ".csv" ) )
+    
+  }
+  
+  matching_dat$unique_ID <- apply( matching_dat, 1, FUN = function( x ) paste( str_pad( x, 3, side = 'left', pad = 0 ), collapse = '_' ) ) # paste the ids from each video to generate a unique identifier for each tracklet for the night
+  
+  
+  ## read in tracks
+  #t_files <- list.files( path = paste0( "Z:\\baboon\\working\\video\\thermal\\thermal_baboon\\RESULTS\\tracking_output\\viewpoint_1\\finalized_tracks\\", night ), pattern = '.csv', full.names = T, recursive = T )
+  t_files <- list.files( path = paste0( "RESULTS/tracking_output/viewpoint_1/finalized_tracks/", night, "/" ), pattern = '.csv', full.names = T, recursive = T )
+  
+  t_files <-  sort( t_files )
+  
+  dfs <- lapply( as.list( t_files ), read.csv )
+  
+  print( t_files )
+  
+  ## read in frame information
+  if( input_data == 'corrected' ){
+    
+    files <- list.files( path = paste0( "RESULTS/tracking_output/viewpoint_1/finalized_tracks/", night, "/" ), pattern = '.txt', full.names = T, recursive = T )
+    
+  }else{
+    
+    if( input_data == 'uncorrected' ){
+      
+      files <- list.files( path = paste0( "RESULTS/tracking_output/viewpoint_1/uncorrected_tracks/", night, "/" ), pattern = '.txt', full.names = T, recursive = T )
+      
+    }
+  }
+  
+  
+  files <-  sort( files )
+  
+  timestamp_txts <- lapply( as.list( files ), read.table ) # read in each txt file with the frame information. These txt files give the timestamp of each frame
+  
+  ## add timestamp to the thermal tracking data frames
+  for( i in 1:length( timestamp_txts ) ){ # for each hour of video recording (i.e. each separate video)...
+    
+    frame_info <- timestamp_txts[[ i ]] # save the dataframe with the timestamps from this video
+    
+    vid_name <- str_split_fixed( basename( files[ i ] ), ".txt", 2 )[ , 1 ] # split the string to extract the name of the video
+    
+    if( nrow( dfs[[ i ]] ) == 0 ){
+      
+      next 
+      
+    }
+    
+    if( vid_name != as.character( unique( dfs[[ i ]]$vid_name ) ) ){ # check to make sure that the video name from this txt file matches the name of the video from the tracklet data before we merge the timestamps from this txt file dataframe into the tracklet data frame
+      
+      stop( ".txt file does not match .mp4 video file" )
+      
+    }
+    
+    ## use the frame information to associate a timestamp with each frame
+    names( frame_info ) <- c( "file", "frame_info" ) # name the columns
+    
+    # split the string twice to extract the timestamp associated with each frame
+    frame_timestamps_temp <- str_split_fixed( frame_info$frame_info, "_", 2 )[, 2 ]
+    
+    frame_timestamps <- str_split_fixed( frame_timestamps_temp, ".tiff", 2 )[, 1 ]
+    
+    
+    ## reformat to the typical timestamp format by parsing the string (using the format field of as.POSIX can get me part way there to the reformatting, but causes problems with the milliseconds)
+    final_timestamps <- paste0( substring( frame_timestamps, 1, 4 ), "-", substring( frame_timestamps, 5, 6 ), "-", substring( frame_timestamps, 7, 8 ), " ", substring( frame_timestamps, 10, 11 ), ":", substring( frame_timestamps, 12, 13 ), ":", substring( frame_timestamps, 14, 15 ), ".", substring( frame_timestamps, 16, 21 ) )
+    
+    ## change the timestamps into posix elements
+    final_timestamps_posx <- as.POSIXct( final_timestamps, tz = "UTC", format = "%Y-%m-%d %H:%M:%OS" )
+    
+    ## associate each frame number in the tracklets dataframe with the timestamp of that frame (+1 because of the difference between python and R indexing)
+    tmstp <- final_timestamps_posx[ ( dfs[[ i ]]$frame + 1 ) ]
+    
+    dfs[[ i ]]$timestamp <- tmstp # add this timestamp information to the tracklet data frame
+    
+    ## save the start time of the video (we will use this start time to look for tracks that start right around it, as potential candidates for continuations)
+    dfs[[ i ]]$vid_start <- min( final_timestamps_posx )
+    
+    ## save the end time of the video (we will use this end time to look for tracks that end just before it, to stitch them to tracklets that start in the next video)
+    dfs[[ i ]]$vid_end <- max( final_timestamps_posx )
+    
+    if( sum( is.na( dfs[[ i ]]$timestamp ) ) > 0 ){ # check to make sure all locations in the tracklet dataframe received a timestamp
+      
+      stop( "some timestamps not matched up" )
+    }
+  }
+  
+  
+  ## merge the unique identifier information back into the original tracking data frames
+  
+  for( i in 1:length( dfs ) ){
+    
+    df_vid_name <- unique( dfs[[ i ]]$vid_name )
+    
+    col_ind <- which( grepl( df_vid_name, names( matching_dat ) ) )
+    
+    col_name <- names( matching_dat )[ col_ind ]
+    
+    ids_included <- sort( unique( matching_dat[ , col_name ] ) )
+    
+    all_ids <- unique( dfs[[ i ]]$id )
+    
+    ids_excluded <- all_ids[ ! all_ids %in% ids_included ]
+    
+    df_to_add <- data.frame( matrix( NA, nrow = length( ids_excluded ), ncol = length( dfs ) ) )
+    
+    df_to_add[ , col_ind ] <- ids_excluded
+    
+    df_to_add$unique_ID <- apply( df_to_add, 1, FUN = function( x ) paste( str_pad( x, 3, side = 'left', pad = 0 ), collapse = '_' ) ) # paste the ids from each video to generate a unique identifier for each tracklet for the night
+    
+    names( df_to_add ) <- names( matching_dat )
+    
+    dat_to_merge_nonas <- matching_dat[ !is.na( matching_dat[ , col_name ] ), ]
+    
+    final_merge_dat <- rbind( dat_to_merge_nonas, df_to_add )
+    
+    dfs[[ i ]] <- merge( x = dfs[[ i ]], y = final_merge_dat[ , c( col_name, 'unique_ID' ) ], by.x = 'id', by.y = col_name, all.x = T, all.y = F, sort = F )
+    
+  }
+  
+  therm_tracks <- ldply( dfs ) # combine tracklet data frames from each hour into a single data frame
+  
+  head( therm_tracks )
+  
+  therm_tracks <- therm_tracks[ order(therm_tracks$timestamp ), ] # order by timestamp
+  therm_tracks <- therm_tracks[ order(therm_tracks$unique_ID ), ] # order by ID
+  
+  sum( is.na( therm_tracks$unique_ID ) ) # check if there are any tracklets with no unique identifier
+  
+  # add the 16 second correction to the thermal tracklets to align them with GPS time. Nevermind, I am doing the time correction in the sensor data now
+  
+  # therm_tracks$corr_timestamp <- therm_tracks$timestamp + 16
+  
+  saveRDS( therm_tracks, paste0( "DATA/thermal_tracks/manual_stitch_across_vids/", input_data, "/", night, "_tracks.rds" ) )
+  
+  return( therm_tracks )
+}
+
+stopImplicitCluster()
+
+
+
+
+
+
+
+
