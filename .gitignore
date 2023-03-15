@@ -31,6 +31,7 @@
 *-blx.aux
 *-blx.bib
 *.run.xml
+*.xml
 
 ## Build tool auxiliary files:
 *.fdb_latexmk
@@ -275,6 +276,11 @@ TSWLatexianTemp*
 # Makeindex log files
 *.lpz
 
+# Media files
+*.tiff
+*.jpg
+*.mp4
+*.avi
 
 DOCS/
 
