@@ -1,0 +1,20 @@
+#!/bin/bash -l
+
+#SBATCH -J python          # job name
+#SBATCH -o ./job.out.%j    # standard out file
+#SBATCH -e ./job.err.%j    # standard err file
+#SBATCH -D ./              # work directory
+   
+
+#SBATCH --nodes=2         # launch job on a single core
+#SBATCH --cpus-per-task=72  #   on a shared node
+#SBATCH --time=24:00:00     # run time, up to 24h
+#sbatch --array=1-2
+
+#SBATCH --mail-type=none
+#SBATCH --mail-user=rharel@ab.mpg.de
+
+##### here you can list the modules that you need to load in order for the job to run e.g. (but see “getting R to work on cluster”
+module load anaconda/3/2021.11
+module load ffmpeg/4.4
+python 00e_writing_full_vids.py
