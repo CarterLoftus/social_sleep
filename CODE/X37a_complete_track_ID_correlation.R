@@ -965,7 +965,403 @@ for (ni in 1:length(nights)) {
     }
         
         
- }
+}
+
+#### Vedba run on each tracklet
+
+window_size <- 60 * 60 * 12
+step_size <- 60 * 60 * 12
+start_time <- min(trim_vedba_smooth$corr_local_timestamp)
+end_time <- max(trim_vedba_smooth$corr_local_timestamp)
+
+window_start_times <-
+  start_time
+window_end_times <-
+  end_time
+
+tags <-
+  names(trim_vedba_smooth)[names(trim_vedba_smooth) != 'corr_local_timestamp']
+
+identity_scores_cont_ved <-
+  data.frame(
+    tag = rep(tags, each = length(window_start_times)),
+    window_start_time = rep(window_start_times, times = length(tags)),
+    candidate_tracklet = NA,
+    score = NA,
+    tracklet_moved = NA
+  )
+
+speed_thresh <-
+  0.2 # this is the speed in meters per second that a baboon needs to exceed to be considered moving
+
+names_list <- names(tracklet_lengths[tracklet_lengths > 0])
+colors <- rainbow(length(track_ids))
+
+win_size_cont <- 6
+min_speed_thres <- 0
+max_speed_thres <- 2.5
+move_speed_thres <- 0.3
+
+tag_vedba_thres <- 1.3
+pad_size <- win_size_cont / 2 - 0.5
+tag <- tags[3]
+plot_list <- list()
+cors <- matrix(0, nrow = length(track_ids), ncol = length(tags))
+durs <- matrix(0, nrow = length(track_ids), ncol = length(tags))
+
+for (ii in 1:length(track_ids)) {
+  plot_list <- list()
+  track <- track_ids[ii]
+  candidtae_track <-
+    smooth_tracks[smooth_tracks$id == track, ]
+  
+  dx <- diff(candidtae_track$x_final)
+  dy <- diff(candidtae_track$y_final)
+  dt <-
+    as.numeric(diff(candidtae_track$local_timestamp, units = "secs"))
+  vx <- dx / dt
+  vy <- dy / dt
+  
+  candidtae_track$speed[-1] = sqrt(vx ^ 2 + vy ^ 2)
+  # Calculate acceleration components (ax and ay)
+  dvx <- diff(vx)
+  dvy <- diff(vy)
+  dt <-
+    as.numeric(diff(candidtae_track$local_timestamp[-1])) # Use t[-1] to remove the last timestamp, as diff reduces the length by 1
+  ax <- dvx / dt
+  ay <- dvy / dt
+  pad_indexes <-
+    floor((pad_size + 1):(length(ax) -  pad_size))
+  tmp <-
+    sqrt((dy_acc(ax, win_size = win_size_cont)) ** 2 + (dy_acc(ay, win_size = win_size_cont))**2)
+  tmp <- tmp[!is.na(tmp)]
+  if (sum(!is.na(tmp)) > 0) {
+    
+    if (length(candidtae_track$ved[pad_indexes]) == length(tmp)){
+      candidtae_track$ved[pad_indexes] <- tmp
+    } else {
+      candidtae_track$ved[pad_indexes] <- tmp
+    }
+  }
+  
+  tracklet_scaled <-
+    candidtae_track$speed > move_speed_thres
+  
+  if (nrow(candidtae_track) > 0) {
+    
+    for (tt in 1:length(tags)) {
+      tag <- tags[tt]
+      # merge trim_burst_vedba_one_sec AND trim_vedba_smooth
+      tag_dat <- trim_vedba_smooth[, tag]
+      tag_dat[is.na(tag_dat)] <- trim_burst_vedba_one_sec[,tag][is.na(tag_dat)]
+      
+      # filter matching times and data
+      times_tag_all <- trim_vedba_smooth$corr_local_timestamp
+      
+      tag_scaled <- log(tag_dat) > tag_vedba_thres
+      
+      # Find the intersection between the two vectors
+      intersection <-
+        intersect(times_tag_all, candidtae_track$local_timestamp)
+      # Get the indexes of the intersection elements in vector1
+      indexes_tag <- which(times_tag_all %in% intersection)
+      # Get the indexes of the intersection elements in vector2
+      indexes_tracklet <-
+        which(candidtae_track$local_timestamp %in% intersection)
+      
+      tag_scaled_trim <- tag_scaled[indexes_tag]
+      tracklet_scaled_trim <- tracklet_scaled[indexes_tracklet]
+      
+      # calculate correlation 
+      data_kappa <- data.frame(
+        tag = tag_scaled_trim,
+        tracklet = tracklet_scaled_trim
+      )
+      
+      data_kappa <- na.omit(data_kappa)
+      # Calculate Cohen's Kappa
+      if (sum(data_kappa$tracklet == T,na.rm = T) > 0) {
+        cors[ii,tt] <- kappa2(data_kappa)$value
+        durs[ii,tt] <- nrow(data_kappa)
+      }
+      
+      # 
+    }
+  }
+  
+}
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+tag <- tags[1]
+for (tag in tags) {
+  plot_list <- list()
+  print(tag)
+  trim_burst_vedba_one_sec
+  # merge trim_burst_vedba_one_sec AND trim_vedba_smooth
+  
+  #input_tag_data[is.na(input_tag_data)] <- trim_burst_vedba_one_sec[,tag][is.na(input_tag_data)]
+  
+  tag_dat <- trim_vedba_smooth[, tag]
+  tag_dat[is.na(tag_dat)] <- trim_burst_vedba_one_sec[,tag][is.na(tag_dat)]
+  
+  times_tag_all <- input_tag_data$corr_local_timestamp
+  
+  for (i in 1:length(window_start_times)) { 
+    
+    tag_window_dat <-
+      tag_dat[times_tag_all >= window_start_times[i] &
+                times_tag_all <= window_end_times[i]]
+    
+    times_tag <-
+      times_tag_all[times_tag_all >= window_start_times[i] &
+                      times_tag_all <= window_end_times[i]]
+    if (sum(!is.na(tag_window_dat)) > 0) {
+      # sc <- scale(tag_window_dat,center = FALSE, scale = max(tag_window_dat,na.rm = T) - min(tag_window_dat,na.rm = T))
+      
+      tag_scaled <- log(tag_window_dat) > tag_vedba_thres
+      # tag_scaled <- (tag_window_dat - min(tag_window_dat,na.rm = T)) / (max(tag_window_dat,na.rm = T) - min(tag_window_dat,na.rm = T))
+      
+      data_tag <- data.frame(times = times_tag,
+                             tag = as.numeric(tag_scaled))
+      
+      # Create a ggplot object
+      gg <- ggplot(na.omit(data_tag), aes(x = times, y = tag)) +
+        geom_point() +
+        labs(x = "Time",
+             y = "Value",
+             title = "Time Series Plot") +
+        scale_x_datetime(labels = scales::date_format("%H:%M:%S") + 
+                           theme_minimal())
+      
+      # Change the x-axis tick label format
+      
+      
+      track_ids <- unique(smooth_tracks$id)
+      track_times <- unique(smooth_tracks$local_timestamp)
+      cors <- numeric()
+      durs <- numeric()
+      flags <- numeric()
+      counter = 1
+      for (ii in 1:length(track_ids)) {
+        track <- track_ids[ii]
+        candidtae_track <-
+          smooth_tracks[smooth_tracks$id == track, ]
+        
+        dx <- diff(candidtae_track$x_final)
+        dy <- diff(candidtae_track$y_final)
+        dt <-
+          as.numeric(diff(candidtae_track$local_timestamp, units = "secs"))
+        vx <- dx / dt
+        vy <- dy / dt
+        
+        candidtae_track$speed[-1] = sqrt(vx ^ 2 + vy ^ 2)
+        # Calculate acceleration components (ax and ay)
+        dvx <- diff(vx)
+        dvy <- diff(vy)
+        dt <-
+          as.numeric(diff(candidtae_track$local_timestamp[-1])) # Use t[-1] to remove the last timestamp, as diff reduces the length by 1
+        ax <- dvx / dt
+        ay <- dvy / dt
+        pad_indexes <-
+          floor((pad_size + 1):(length(ax) -  pad_size))
+        tmp <-
+          sqrt((dy_acc(ax, win_size = win_size_cont)) ** 2 + (dy_acc(ay, win_size = win_size_cont))**2)
+        tmp <- tmp[!is.na(tmp)]
+        if (sum(!is.na(tmp)) > 0) {
+          
+          if (length(candidtae_track$ved[pad_indexes]) == length(tmp)){
+            candidtae_track$ved[pad_indexes] <- tmp
+          } else {
+            candidtae_track$ved[pad_indexes] <- tmp
+          }
+        }
+        
+        tracklet_window_dat <-
+          candidtae_track[candidtae_track$local_timestamp >= window_start_times[i] &
+                            candidtae_track$local_timestamp <= window_end_times[i], ]
+        
+        if (nrow(tracklet_window_dat) > 0) {
+          # print(ii)
+          # tracklet_scaled <- (tracklet_window_dat$speed - min_speed_thres) / (max_speed_thres - min_speed_thres)
+          tracklet_scaled <-
+            tracklet_window_dat$speed > move_speed_thres
+          
+          tag_scaled_trim <-
+            tag_scaled[times >= min(tracklet_window_dat$local_timestamp) &
+                         times <= max(tracklet_window_dat$local_timestamp)]
+          
+          # Find the intersection between the two vectors
+          intersection <-
+            intersect(times_tag, tracklet_window_dat$local_timestamp)
+          # Get the indexes of the intersection elements in vector1
+          indexes_tag <- which(times_tag %in% intersection)
+          # Get the indexes of the intersection elements in vector2
+          indexes_tracklet <-
+            which(tracklet_window_dat$local_timestamp %in% intersection)
+          
+          tag_scaled_trim <- tag_scaled[indexes_tag]
+          
+          
+          # cors[ii] <- cor.test( tag_scaled_trim, tracklet_scaled )$estimate
+          # cors[ii] <- cor(as.numeric(tag_scaled_trim[!is.na(tag_scaled_trim)]), as.numeric(tracklet_scaled[!is.na(tag_scaled_trim)]))$estimate
+          # tag_for_corr <-
+          #   as.numeric(tag_scaled_trim[!is.na(tag_scaled_trim)])
+          # tracklet_for_corr <-
+          #   as.numeric(tracklet_scaled[!is.na(tag_scaled_trim)])
+          # #data_df <- data.frame(tag_for_corr, tracklet_for_corr)
+          
+          # intersection <- sum(tag_for_corr & tracklet_for_corr)  # in both vectors
+          # union <- sum(tag_for_corr | tracklet_for_corr)         # in either vector
+          # cors[ii] <- intersection / union
+          
+          data_kappa <- data.frame(
+            tag = tag_scaled_trim,
+            tracklet = tracklet_scaled
+          ) # times = tracklet_window_dat$local_timestamp  ,
+          
+          data_kappa <- na.omit(data_kappa)
+          
+          if (sum(!is.na(data_kappa$tag)) > 0) {
+            cors[ii] <- kappa2(data_kappa)$value
+            durs[ii] <- nrow(data_kappa)
+          }
+          # Calculate Cohen's Kappa
+          data_tracklet_plot <- data.frame(
+            times = tracklet_window_dat$local_timestamp  ,
+            tracklet = as.numeric(tracklet_scaled) + counter
+          )
+          
+          
+          gg = gg + geom_point(
+            data = na.omit(data_tracklet_plot),
+            aes(x = times, y = tracklet),
+            color = colors[ii]
+          )
+          counter <- counter + 1
+          
+        }
+        
+      }
+    }
+    # plot_list[[i]] <- gg
+    # print(i)
+    
+    ## plot top N matches
+    N <- 5
+    dur_thres <- 5
+    index_long_dur <- which(durs>dur_thres)
+    top_indexes <- index_long_dur[order(cors[index_long_dur], decreasing = TRUE)[1:N]]
+    
+    data_top_plot <- data.frame(times = times_tag,
+                                sc = as.numeric(tag_scaled))
+    
+    # Create a ggplot object
+    gg_top <- ggplot(na.omit(data_top_plot), aes(x = times, y = sc)) +
+      geom_point() +
+      labs(x = "Time",
+           y = "Value",
+           title = "Time Series Plot") +
+      scale_x_datetime(labels = scales::date_format("%H:%M:%S")) +
+      theme_minimal()
+    
+    counter = 2
+    for (tt in top_indexes) {
+      track <- track_ids[tt]
+      candidtae_track <-
+        smooth_tracks[smooth_tracks$id == track, ]
+      
+      
+      dx <- diff(candidtae_track$x_final)
+      dy <- diff(candidtae_track$y_final)
+      dt <-
+        as.numeric(diff(candidtae_track$local_timestamp, units = "secs"))
+      vx <- dx / dt
+      vy <- dy / dt
+      
+      candidtae_track$speed[-1] = sqrt(vx ^ 2 + vy ^ 2)
+      
+      tracklet_window_dat <-
+        candidtae_track[candidtae_track$local_timestamp >= window_start_times[i] &
+                          candidtae_track$local_timestamp <= window_end_times[i], ]
+      
+      if (nrow(tracklet_window_dat) > 0) {
+        #print(track)
+        #print(sc)
+        
+        tracklet_scaled <-
+          tracklet_window_dat$speed > move_speed_thres
+        
+        #print(ii)
+        
+        tag_scaled_trim <-
+          tag_scaled[times >= min(tracklet_window_dat$local_timestamp) &
+                       times <= max(tracklet_window_dat$local_timestamp)]
+        
+        data_top <- data.frame(
+          times = tracklet_window_dat$local_timestamp  ,
+          sc = as.numeric(tracklet_scaled) + counter
+        )
+        
+        # Create a ggplot object
+        # gg <- ggplot(data, aes(x = times, y = sc)) +
+        #   geom_point() +
+        #   labs(x = "Time", y = "Value", title = "Time Series Plot") +
+        #   scale_x_datetime(labels = scales::date_format("%H:%M:%S"))
+        #
+        #sc <- scale(tracklet_window_dat$ved,center = TRUE, scale = max(tracklet_window_dat$speed,na.rm = T) - min(tracklet_window_dat$speed,na.rm = T))
+        #print(ii)
+        
+        gg_top <-
+          gg_top + geom_point(data = na.omit(data_top),
+                              aes(x = times, y = sc),
+                              color = colors[tt], size = 5) + geom_hline(yintercept = counter + 1.5, linetype = "dashed", color = "red")
+        
+        counter <- counter + 2
+      }
+      
+      
+    }
+    vec_text = seq(3.25, by = 2, length.out = N)
+    
+    text_data <- data.frame(
+      x = c(rep(times_tag[1], times = c(N))),
+      y = c(vec_text),
+      label = c(sprintf("%.2f", cors[top_indexes]))
+    )
+    gg_top <- gg_top +
+      geom_text(data = text_data, aes(x = x, y = y, label = label), size = 4, color = "red")
+    
+    plot_list[[i]] <- gg_top
+  }
+  pdf_file <- gsub(" ", "_",paste(tag, 'top.pdf'))
+  
+  # Open the PDF device for writing
+  pdf(pdf_file, width = 6, height = 4)  # Adjust width and height as needed
+  
+  # Loop through the list of plots and save each plot as a separate page in the PDF
+  for (k in 1:length(plot_list)) {
+    print(k)
+    print(plot_list[[k]])
+  }
+  
+  # Close the PDF device
+  dev.off()
+  
+  # Check if the PDF file was saved successfully
+  file.exists(pdf_file)
+  
+}
+
+
 
       
 #### rest of the code ####
