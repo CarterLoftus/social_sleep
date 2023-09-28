@@ -137,6 +137,7 @@ burst_vedba_one_sec <- as.data.frame(burst_vedba_one_sec)
 burst_vedba_one_sec$corr_local_timestamp <-
   as.POSIXct(burst_vedba_one_sec$corr_local_timestamp, tz = 'UTC')
 
+#### load trackelts ####
 options(warn = 0)
 
 dir.create(paste(getwd(), "DATA/thermal_tracks/identified_tracks", sep = '/'))
@@ -160,6 +161,7 @@ if (str_split(getwd(), "/", simplify = T)[1, 3] == 'meerkat') {
   
 }
 
+#### main loop ####
 
 #identified_tracks <- foreach( ni = 1:length( nights ) ) %dopar% {
 ni = 5
@@ -638,27 +640,30 @@ for (ni in 1:length(nights)) {
   )
   
   
-  ## VEDBA
+  #### VEDBA ####
+  # check matching of time series duplicate of following rows
   
-  window_size <- 60 * 60
-  
-  step_size <- 10 * 60
-  
+  window_size <- 60 * 60 * 12
+  step_size <- 60 * 60 * 12
   start_time <- min(trim_vedba_smooth$corr_local_timestamp)
-  
   end_time <- max(trim_vedba_smooth$corr_local_timestamp)
   
-  window_start_times <-
-    seq(from = start_time,
-        to = (end_time - window_size + 1),
-        by = step_size)
+  # window_start_times <-
+  #   seq(from = start_time,
+  #       to = (end_time - window_size + 1),
+  #       by = step_size)
   
+  window_start_times <-
+    start_time
+  
+  # window_end_times <-
+  #   seq(
+  #     from = (start_time + window_size - 1),
+  #     to = end_time,
+  #     by = step_size)
+    
   window_end_times <-
-    seq(
-      from = (start_time + window_size - 1),
-      to = end_time,
-      by = step_size
-    )
+    end_time
   
   tags <-
     names(trim_vedba_smooth)[names(trim_vedba_smooth) != 'corr_local_timestamp']
@@ -685,12 +690,6 @@ for (ni in 1:length(nights)) {
   #
   # i <- which(  as.character( as.POSIXct( window_start_times, origin = '1970-01-01 00:00:00', tz = 'UTC' ) ) == time_to_check )
   #
-  
-  
-  
-  #################################################
-  # check matching of time series duplicate of following rows
-  #################################################
   
   names_list <- names(tracklet_lengths[tracklet_lengths > 0])
   colors <- rainbow(length(track_ids))
@@ -719,7 +718,8 @@ for (ni in 1:length(nights)) {
     
     times_tag_all <- input_tag_data$corr_local_timestamp
     
-    for (i in 1:5) { # length(window_start_times)
+    for (i in 1:length(window_start_times)) { 
+      
       tag_window_dat <-
         tag_dat[times_tag_all >= window_start_times[i] &
                   times_tag_all <= window_end_times[i]]
@@ -933,12 +933,12 @@ for (ni in 1:length(nights)) {
           
           
         }
-        vec_text = seq(3.35, by = 2, length.out = N)
+        vec_text = seq(3.25, by = 2, length.out = N)
         
         text_data <- data.frame(
                x = c(rep(times_tag[1], times = c(N))),
                y = c(vec_text),
-               label = c(cors[top_indexes])
+               label = c(sprintf("%.2f", cors[top_indexes]))
            )
         gg_top <- gg_top +
               geom_text(data = text_data, aes(x = x, y = y, label = label), size = 4, color = "red")
@@ -966,8 +966,10 @@ for (ni in 1:length(nights)) {
         
         
  }
+
       
-  
+#### rest of the code ####
+
     
     tracklet_window_dat <-
       candidtae_track[candidtae_track$local_timestamp >= window_start_times[i] &
@@ -1012,10 +1014,10 @@ for (ni in 1:length(nights)) {
       # lines(tracklet_window_dat$local_timestamp,tracklet_window_dat$speed, col = colors[ii])
       
     }
-  }
-}
+  
+
 print(gg)
-}
+
 #  "2019-08-06 17:03:37 UTC" "2019-08-06 17:13:36 UTC"
 ######################################################
 #####################################################
