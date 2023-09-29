@@ -1001,7 +1001,7 @@ win_size_cont <- 6
 min_speed_thres <- 0
 max_speed_thres <- 2.5
 move_speed_thres <- 0.2
-
+min_dur <- 10
 tag_vedba_thres <- 1.1
 pad_size <- (win_size_cont / 2) - 0.5
 tag <- tags[3]
@@ -1021,7 +1021,8 @@ gg_top <- ggplot(na.omit(data_top_plot), aes(x = times, y = sc)) +
        title = "Time Series Plot") +
   scale_x_datetime(labels = scales::date_format("%H:%M:%S")) +
   theme_minimal()
-####
+
+#### run tracklet by tracklet - no time window and find matching tags
 
 for (ii in 1:length(track_ids)) {
   track <- track_ids[ii]
@@ -1057,8 +1058,6 @@ for (ii in 1:length(track_ids)) {
       candidtae_track$ved[pad_indexes] <- tmp
     }
   }
-  
-  
   
   tracklet_scaled <-
     candidtae_track$speed > move_speed_thres
@@ -1103,12 +1102,22 @@ for (ii in 1:length(track_ids)) {
       
       # 
     }
+  
   }
   
 }
 
-    
-    
+thres_cor <- 0.4
+smooth_tracks$tag <- ""
+for (ii in 1:length(track_ids)) {
+  if (length(cors[ii,durs[ii, ] > min_dur])>0) {
+    max_val <- max(cors[ii,durs[ii, ] > min_dur],na.rm = T)
+    max_ind <- which.max(cors[ii,durs[ii, ] > min_dur])
+    if (max_val > thres_cor) {
+      smooth_tracks$tag[smooth_tracks$id == track] <- tags[max_ind]
+  }
+}
+}
     
     
     
