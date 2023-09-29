@@ -1000,17 +1000,30 @@ colors <- rainbow(length(track_ids))
 win_size_cont <- 6
 min_speed_thres <- 0
 max_speed_thres <- 2.5
-move_speed_thres <- 0.3
+move_speed_thres <- 0.2
 
-tag_vedba_thres <- 1.3
-pad_size <- win_size_cont / 2 - 0.5
+tag_vedba_thres <- 1.1
+pad_size <- (win_size_cont / 2) - 0.5
 tag <- tags[3]
 plot_list <- list()
 cors <- matrix(0, nrow = length(track_ids), ncol = length(tags))
 durs <- matrix(0, nrow = length(track_ids), ncol = length(tags))
 
+####
+data_top_plot <- data.frame(times = times_tag,
+                            sc = as.numeric(tag_scaled))
+
+# Create a ggplot object
+gg_top <- ggplot(na.omit(data_top_plot), aes(x = times, y = sc)) +
+  geom_point() +
+  labs(x = "Time",
+       y = "Value",
+       title = "Time Series Plot") +
+  scale_x_datetime(labels = scales::date_format("%H:%M:%S")) +
+  theme_minimal()
+####
+
 for (ii in 1:length(track_ids)) {
-  plot_list <- list()
   track <- track_ids[ii]
   candidtae_track <-
     smooth_tracks[smooth_tracks$id == track, ]
@@ -1034,15 +1047,18 @@ for (ii in 1:length(track_ids)) {
     floor((pad_size + 1):(length(ax) -  pad_size))
   tmp <-
     sqrt((dy_acc(ax, win_size = win_size_cont)) ** 2 + (dy_acc(ay, win_size = win_size_cont))**2)
-  tmp <- tmp[!is.na(tmp)]
+  #tmp <- tmp[!is.na(tmp)]
   if (sum(!is.na(tmp)) > 0) {
-    
     if (length(candidtae_track$ved[pad_indexes]) == length(tmp)){
       candidtae_track$ved[pad_indexes] <- tmp
+    } else if (length(candidtae_track$ved[seq(2,length(candidtae_track$ved)-1)]) == length(tmp)) {
+      candidtae_track$ved[seq(2,length(candidtae_track$ved)-1)] <- tmp
     } else {
       candidtae_track$ved[pad_indexes] <- tmp
     }
   }
+  
+  
   
   tracklet_scaled <-
     candidtae_track$speed > move_speed_thres
@@ -1079,7 +1095,7 @@ for (ii in 1:length(track_ids)) {
       )
       
       data_kappa <- na.omit(data_kappa)
-      # Calculate Cohen's Kappa
+      # Calculate Cohen's Kappa  - NAN are all true events - usually short ones
       if (sum(data_kappa$tracklet == T,na.rm = T) > 0) {
         cors[ii,tt] <- kappa2(data_kappa)$value
         durs[ii,tt] <- nrow(data_kappa)
