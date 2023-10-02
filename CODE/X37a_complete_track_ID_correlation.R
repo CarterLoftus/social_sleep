@@ -16,6 +16,8 @@ library(doParallel)
 library(ggplot2)
 library(irr)
 library(zoo)
+library(dplyr)
+
 
 
 ######### functions #########
@@ -164,16 +166,12 @@ if (str_split(getwd(), "/", simplify = T)[1, 3] == 'meerkat') {
 #### main loop ####
 
 #identified_tracks <- foreach( ni = 1:length( nights ) ) %dopar% {
-ni = 5
+ni <- 5
 for (ni in 1:length(nights)) {
   night_of_int <- nights[ni]
   
   print(night_of_int)
-  
-  ###### read in thermal tracklet data and add speeds ######
-  
-  ##### read in tracklet data and fix timestamp #####
-  
+
   smooth_tracks <-
     readRDS(
       paste0(
@@ -185,23 +183,10 @@ for (ni in 1:length(nights)) {
       )
     )
   
-  # if needed re-timing data to min interval
-  # smooth_tracks$min_timestamp <- round_date(smooth_tracks$local_timestamp  , unit = 'minute' ) # make a column of timestamps rounded to the nearest second
-  # smooth_tracks_min <- aggregate( smooth_tracks[ ,  c( 'x_final', 'y_final','speed','ved') ], by = list( smooth_tracks$id, smooth_tracks$min_timestamp ), FUN = mean, na.rm = T ) # take the mean of the x and y locations for each individual and each second
-  # names( smooth_tracks_min )[ 1:2 ] <- c( 'id', 'local_timestamp' ) # rename the columns
-  # smooth_tracks_min <- smooth_tracks_min[ order( smooth_tracks_min$id ), ] # order the tracks by unique identifier
-  #
-  
-  #smooth_tracks$local_timestamp <- as.POSIXct( smooth_tracks$local_timestamp, tz = 'UTC' )
-  #cont_vedba_smoothed$corr_local_timestamp <- as.POSIXct(   cont_vedba_smoothed$corr_local_timestamp, tz = 'UTC' )
-  ## fills in potential gaps in time in the thermal tracklets so that there is a row for each second
   min_time <- min(smooth_tracks$local_timestamp)
   max_time <- max(smooth_tracks$local_timestamp)
   
   all_times <- seq(min_time, max_time, by = '1 sec')
-  
-  # ## can later add spatial discretization to this dataframe (pull it in from 02a_track_ID_pipeline_...)
-  #
   
   ####### trim the GPS and ACC data ###########
   
@@ -345,33 +330,7 @@ for (ni in 1:length(nights)) {
     
   }
   
-  
-  
-  
-  
-  
-  #
-  # #### trim the tracklets to the times when the continuous ACC and GPS are available (this will be everything prior to 18:00) #### Nevermind, not going to do this -- instead just going to keep everything as full as possible
-  
-  # trim_tracklet_speeds <- tracklet_speeds[ tracklet_speeds$local_timestamp <= max( trim_gps_speeds_smooth$corr_local_timestamp ), ]
-  
-  trim_tracklet_speeds <- tracklet_speeds
-  
-  # all of these time-series (ACC, GPS, and tracklet) should have one row for each second from the start of the tracklets to to the end of the tracklets. Let's confirm that
-  identical(
-    trim_tracklet_speeds$local_timestamp,
-    trim_gps_speeds_smooth$corr_local_timestamp
-  )
-  identical(trim_tracklet_speeds$local_timestamp,
-            trim_vedba_smooth$corr_local_timestamp)
-  identical(
-    trim_gps_speeds_smooth$corr_local_timestamp,
-    trim_vedba_smooth$corr_local_timestamp
-  )
-  
-  
-  
-  
+
   track_ids <- unique(smooth_tracks$id)
   track_times <- unique(smooth_tracks$local_timestamp)
   
@@ -379,266 +338,6 @@ for (ni in 1:length(nights)) {
   
   
   ##### identification pipeline #####
-  
-  ## first with GPS
-  
-  window_size <- 10 * 60
-  
-  step_size <- 1 * 60
-  
-  start_time <- min(trim_gps_speeds_smooth$corr_local_timestamp)
-  
-  end_time <- max(trim_gps_speeds_smooth$corr_local_timestamp)
-  
-  window_start_times <-
-    seq(from = start_time,
-        to = (end_time - window_size + 1),
-        by = step_size)
-  
-  window_end_times <-
-    seq(
-      from = (start_time + window_size - 1),
-      to = end_time,
-      by = step_size
-    )
-  
-  tags <-
-    names(trim_gps_speeds_smooth)[names(trim_gps_speeds_smooth) != 'corr_local_timestamp']
-  
-  cor_array <-
-    array(
-      NA,
-      dim = c(
-        length(track_ids),
-        length(tags),
-        length(window_start_times)
-      ),
-      dimnames = list(track_ids, tags, window_start_times)
-    )
-  
-  identity_scores_gps <-
-    data.frame(
-      tag = rep(tags, each = length(window_start_times)),
-      window_start_time = rep(window_start_times, times = length(tags)),
-      candidate_tracklet = NA,
-      score = NA,
-      tracklet_moved = NA
-    )
-  
-  speed_thresh <-
-    0.2 # this is the speed in meters per second that a baboon needs to exceed to be considered moving
-  
-  #
-  #
-  # ### coming back here to do a spot check:
-  #
-  # time_to_check <- '2019-08-06 17:00:37'
-  #
-  # tag <- '2433'
-  #
-  # i <- which(  as.character( as.POSIXct( window_start_times, origin = '1970-01-01 00:00:00', tz = 'UTC' ) ) == time_to_check )
-  #
-  
-  ## GPS SPEED
-  for (tag in tags) {
-    print(tag)
-    
-    tag_dat <- trim_gps_speeds_smooth[, tag]
-    
-    for (i in 1:length(window_start_times)) {
-      score <- 0
-      
-      tag_window_dat <-
-        tag_dat[trim_gps_speeds_smooth$corr_local_timestamp >= window_start_times[i] &
-                  trim_gps_speeds_smooth$corr_local_timestamp <= window_end_times[i]]
-      
-      if (sum(!is.na(tag_window_dat)) > 0) {
-        tracklet_window_dat <-
-          trim_tracklet_speeds[trim_tracklet_speeds$local_timestamp >= window_start_times[i] &
-                                 trim_tracklet_speeds$local_timestamp <= window_end_times[i] , names(trim_tracklet_speeds) != 'local_timestamp']
-        
-        tracklet_lengths <-
-          apply(
-            tracklet_window_dat,
-            MARGIN = 2,
-            FUN = function(x)
-              sum(!is.na(x))
-          )
-        
-        tracklet_window_dat <-
-          tracklet_window_dat[, tracklet_lengths > 0]
-        
-        indexes_not_empty <- tracklet_lengths > 0
-        
-        tracklet_lengths <- tracklet_lengths[tracklet_lengths > 0]
-        
-        cors <-
-          apply(
-            tracklet_window_dat,
-            2,
-            FUN = function(x)
-              cor_function(x, tag_window_dat)
-          )
-        
-        cor_array[indexes_not_empty, tag, as.character(as.numeric(window_start_times[i]))] <-
-          cors
-        
-        longest_track <- max(tracklet_lengths)
-        
-        if (longest_track == 0) {
-          # if there are not tracklets during this time window (that pretty much only happens when we have completed tracks at the beginning of the night and at the end of the night, but not in the middle of the night -- and now we are looking to match the tag with tracklets in the middle of the night), then skip this time window and move on to the next
-          
-          next
-          
-        }
-        
-        inds_to_remove <- tracklet_lengths > 0.8 * longest_track
-        
-        full_tracklets_window <-
-          tracklet_window_dat[, inds_to_remove]
-        
-        rm(closest_tracklet) # just to be safe
-        
-        if ('numeric' %in% class(full_tracklets_window)) {
-          # if there is only one tracklet that takes up the full window
-          
-          closest_tracklet <-
-            names(which(tracklet_lengths == longest_track))
-          
-          correl <-
-            cor_function(full_tracklets_window, tag_window_dat)
-          
-          if (is.na(correl)) {
-            next
-            
-          }
-          
-        } else{
-          cors <-
-            apply(
-              full_tracklets_window,
-              2,
-              FUN = function(x)
-                cor_function(x, tag_window_dat)
-            )
-          
-          # this needs to be here because sometimes there is tracklets that reach the duration requirements, but can still have little or no overlap with the tag data becase the tag data itself is quite lacking
-          cors <- cors[!is.na(cors)]
-          
-          if (sum(!is.na(cors)) == 0) {
-            next
-            
-          }
-          
-          closest_tracklet <- names(which.max(cors))
-          
-          if (length(cors) >= 4) {
-            outlier_scores <-
-              DescTools::LOF(cors, max(floor(length(cors) / 3), 2))
-            
-            cand_outlier_score <-
-              outlier_scores[names(cors) == closest_tracklet]
-            
-            score <-
-              ifelse(cand_outlier_score > 2, score + 1, score)
-          }
-          
-        }
-        
-        identity_scores_gps[identity_scores_gps$tag == tag &
-                              identity_scores_gps$window_start_time == window_start_times[i], 'candidate_tracklet'] <-
-          closest_tracklet
-        
-        ## subset to the tracklet data during this time window
-        focal_tracklet_window_dat <-
-          trim_tracklet_speeds[trim_tracklet_speeds$local_timestamp >= window_start_times[i] &
-                                 trim_tracklet_speeds$local_timestamp <= window_end_times[i] , closest_tracklet]
-        
-        tags_window_dat <-
-          trim_gps_speeds_smooth[trim_gps_speeds_smooth$corr_local_timestamp >= window_start_times[i] &
-                                   trim_gps_speeds_smooth$corr_local_timestamp <= window_end_times[i] , names(trim_gps_speeds_smooth) != 'corr_local_timestamp']
-        
-        focal_tracklet_window_dat[!is.na(focal_tracklet_window_dat)]
-        
-        tracklet_cors <-
-          apply(
-            tags_window_dat,
-            2,
-            FUN = function(x)
-              cor_function(x, focal_tracklet_window_dat)
-          )
-        
-        if (names(tracklet_cors)[which.max(tracklet_cors)] == tag) {
-          score <- score + 1
-          
-          tracklet_cors <- tracklet_cors[!is.na(tracklet_cors)]
-          
-          if (length(tracklet_cors) >= 4) {
-            outlier_scores <-
-              DescTools::LOF(tracklet_cors, max(floor(length(
-                tracklet_cors
-              ) / 3), 2))
-            
-            tag_outlier_score <-
-              outlier_scores[names(tracklet_cors) == tag]
-            
-            score <-
-              ifelse(tag_outlier_score > 2, score + 1, score)
-            
-          }
-        }
-        
-        moved <-
-          sum(focal_tracklet_window_dat > speed_thresh, na.rm = T)
-        
-        if (moved > 0) {
-          score <- score + 1
-          
-          identity_scores_gps[identity_scores_gps$tag == tag &
-                                identity_scores_gps$window_start_time == window_start_times[i], 'tracklet_moved'] <-
-            1
-          
-        } else{
-          identity_scores_gps[identity_scores_gps$tag == tag &
-                                identity_scores_gps$window_start_time == window_start_times[i], 'tracklet_moved'] <-
-            0 # could just instantiate this column filled with 0s and then leave this else clause out, but this will be more likely to catch mistakes in the code, as there shouldn't be any Nas left
-          
-        }
-        
-        identity_scores_gps[identity_scores_gps$tag == tag &
-                              identity_scores_gps$window_start_time == window_start_times[i], 'score'] <-
-          score
-        
-      }
-    }
-  }
-  
-  
-  identity_scores_gps$window_start_time <-
-    as.POSIXct(identity_scores_gps$window_start_time,
-               origin = '1970-01-01',
-               tz = 'UTC')
-  
-  identity_scores_gps[which(identity_scores_gps$score >= 2),]
-  
-  dir.create(paste0(getwd(), '/DATA/thermal_tracks/tracklet_identification/'))
-  
-  dir.create(paste0(
-    getwd(),
-    '/DATA/thermal_tracks/tracklet_identification/',
-    night_of_int
-  ))
-  
-  write.csv(
-    identity_scores_gps,
-    paste0(
-      'DATA/thermal_tracks/tracklet_identification/',
-      night_of_int,
-      '/identity_scores_gps.csv'
-    ),
-    row.names = F
-  )
-  
   
   #### VEDBA ####
   # check matching of time series duplicate of following rows
@@ -680,18 +379,12 @@ for (ni in 1:length(nights)) {
   speed_thresh <-
     0.2 # this is the speed in meters per second that a baboon needs to exceed to be considered moving
   
-  #
-  #
-  # ### coming back here to do a spot check:
-  #
-  # time_to_check <- '2019-08-06 17:00:37'
-  #
-  # tag <- '2433'
-  #
-  # i <- which(  as.character( as.POSIXct( window_start_times, origin = '1970-01-01 00:00:00', tz = 'UTC' ) ) == time_to_check )
-  #
+  tracklet_lengths <- smooth_tracks %>%
+    group_by(id) %>%
+    summarize(val = length(!is.na(speed)))
   
-  names_list <- names(tracklet_lengths[tracklet_lengths > 0])
+  # tracklet_lengths <- apply( tracklet_window_dat, MARGIN = 2, FUN = function( x ) sum( !is.na( x )  ) )
+  names_list <- tracklet_lengths$id[tracklet_lengths$val > 0]
   colors <- rainbow(length(track_ids))
   
   win_size_cont <- 6
@@ -708,7 +401,7 @@ for (ni in 1:length(nights)) {
   for (tag in tags) {
     plot_list <- list()
     print(tag)
-    trim_burst_vedba_one_sec
+    #trim_burst_vedba_one_sec
     # merge trim_burst_vedba_one_sec AND trim_vedba_smooth
     
     #input_tag_data[is.na(input_tag_data)] <- trim_burst_vedba_one_sec[,tag][is.na(input_tag_data)]
@@ -716,7 +409,7 @@ for (ni in 1:length(nights)) {
     tag_dat <- trim_vedba_smooth[, tag]
     tag_dat[is.na(tag_dat)] <- trim_burst_vedba_one_sec[,tag][is.na(tag_dat)]
     
-    times_tag_all <- input_tag_data$corr_local_timestamp
+    times_tag_all <- trim_vedba_smooth$corr_local_timestamp
     
     for (i in 1:length(window_start_times)) { 
       
@@ -754,6 +447,7 @@ for (ni in 1:length(nights)) {
         durs <- numeric()
         flags <- numeric()
         counter = 1
+        
         for (ii in 1:length(track_ids)) {
           track <- track_ids[ii]
           candidtae_track <-
@@ -965,12 +659,14 @@ for (ni in 1:length(nights)) {
     }
         
         
-}
+
 
 #### Vedba run on each tracklet
 
 window_size <- 60 * 60 * 12
 step_size <- 60 * 60 * 12
+times_tag <- trim_vedba_smooth$corr_local_timestamp
+
 start_time <- min(trim_vedba_smooth$corr_local_timestamp)
 end_time <- max(trim_vedba_smooth$corr_local_timestamp)
 
@@ -1008,7 +704,7 @@ tag <- tags[3]
 plot_list <- list()
 cors <- matrix(0, nrow = length(track_ids), ncol = length(tags))
 durs <- matrix(0, nrow = length(track_ids), ncol = length(tags))
-
+smooth_tracks$ved <- NA
 ####
 data_top_plot <- data.frame(times = times_tag,
                             sc = as.numeric(tag_scaled))
@@ -1050,9 +746,9 @@ for (ii in 1:length(track_ids)) {
     sqrt((dy_acc(ax, win_size = win_size_cont)) ** 2 + (dy_acc(ay, win_size = win_size_cont))**2)
   #tmp <- tmp[!is.na(tmp)]
   if (sum(!is.na(tmp)) > 0) {
-    if (length(candidtae_track$ved[pad_indexes]) == length(tmp)){
+    if (length(candidtae_track$speed[pad_indexes]) == length(tmp)){
       candidtae_track$ved[pad_indexes] <- tmp
-    } else if (length(candidtae_track$ved[seq(2,length(candidtae_track$ved)-1)]) == length(tmp)) {
+    } else if (length(candidtae_track$speed[seq(2,length(candidtae_track$speed)-1)]) == length(tmp)) {
       candidtae_track$ved[seq(2,length(candidtae_track$ved)-1)] <- tmp
     } else {
       candidtae_track$ved[pad_indexes] <- tmp
@@ -1107,25 +803,42 @@ for (ii in 1:length(track_ids)) {
   
 }
 
-thres_cor <- 0.4
-smooth_tracks$tag <- ""
+colors_tag <- rainbow(length(tags))
+thres_cor <- 0.1
+smooth_tracks$tag <- NA
+gg_tracks <- ggplot() +
+  labs(x = "Time",
+       y = "Value",
+       title = "Time Series Plot") +
+  scale_x_datetime(labels = scales::date_format("%H:%M:%S")) +
+  theme_minimal()
+counter = 1
 for (ii in 1:length(track_ids)) {
+  track <- track_ids[ii]
   if (length(cors[ii,durs[ii, ] > min_dur])>0) {
     max_val <- max(cors[ii,durs[ii, ] > min_dur],na.rm = T)
     max_ind <- which.max(cors[ii,durs[ii, ] > min_dur])
+    data_tracks <- data.frame(
+      time = smooth_tracks$local_timestamp[smooth_tracks$id == track],
+      tracklet = rep(counter,length.out = length(smooth_tracks$local_timestamp[smooth_tracks$id == track])))   
     if (max_val > thres_cor) {
-      smooth_tracks$tag[smooth_tracks$id == track] <- tags[max_ind]
+      smooth_tracks$tag[smooth_tracks$id == track] <- as.numeric(tags[max_ind])
+      gg_tracks = gg_tracks + 
+        geom_point(data = data_tracks, aes(x = time, y = tracklet), size = 4, color = colors_tag[max_ind]) 
+      counter <- counter + 1
+    } else {
+      gg_tracks = gg_tracks + 
+        geom_point(data = data_tracks, aes(x = time, y = tracklet), size = 4, color = 'gray') 
+      counter <- counter + 1
+  }
   }
 }
-}
-    
-    
-    
-    
-    
-    
-    
+gg_tracks + scale_color_manual(values = colors_tag, labels = tags) + theme(legend.title = element_blank(), 
+                                                                           legend.position = "right")
 
+}
+#######################
+#######################
 tag <- tags[1]
 for (tag in tags) {
   plot_list <- list()
@@ -1385,8 +1098,8 @@ for (tag in tags) {
   file.exists(pdf_file)
   
 }
-
-
+#######################
+#######################
 
       
 #### rest of the code ####
